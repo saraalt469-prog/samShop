@@ -9,45 +9,49 @@ use Illuminate\Http\Request;
 class CartController extends Controller
 {
 
-    public function index()
+   public function index()
     {
-        $cart = auth()->user()->cartItems()->with('product')->get();
-        return response()->json($cart);
+        $items = auth()->user()->cartItems()->with('product')->get();
+        
+        $total = 0;
+        foreach ($items as $item) {
+            $total += $item->product->price * $item->quantity;
+        }
+        
+        return response()->json([
+            'items' => $items,
+            'total_price' => $total
+        ]);
     }
 
-    // Добавление
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'product_id' => 'required|exists:products,id',
+        $request->validate([
+            'product_id' => 'required',
             'quantity' => 'required|integer|min:1'
         ]);
 
-        $product = Product::find($validated['product_id']);
+        $product = Product::find($request->product_id);
         
-        if ($product->stock < $validated['quantity']) {
-            return response()->json(['message' => 'Недостаточно товара'], 400);
+        if ($product->stock < $request->quantity) {
+            return response()->json(['message' => 'Не хватает товара'], 400);
         }
 
-        // Поиск существующего
-        $cartItem = CartItem::where('user_id', auth()->id())
-            ->where('product_id', $validated['product_id'])
+        $cart = CartItem::where('user_id', auth()->id())
+            ->where('product_id', $request->product_id)
             ->first();
 
-        if ($cartItem) {
-            // Обновл
-            $cartItem->quantity += $validated['quantity'];
-            $cartItem->save();
+        if ($cart) {
+            $cart->quantity += $request->quantity;
+            $cart->save();
         } else {
-            // Создаем 
-            $cartItem = CartItem::create([
+            CartItem::create([
                 'user_id' => auth()->id(),
-                'product_id' => $validated['product_id'],
-                'quantity' => $validated['quantity']
+                'product_id' => $request->product_id,
+                'quantity' => $request->quantity
             ]);
         }
-
-        return response()->json($cartItem->load('product'), 201);
+        return response()->json(['message' => 'Добавлено']);
     }
 
     public function destroy($id)
@@ -59,5 +63,31 @@ class CartController extends Controller
         $cartItem->delete();
 
         return response()->json(['message' => 'Товар удален']);
+    }
+    public function clear()
+    {
+        auth()->user()->cartItems()->delete();
+        return response()->json(['message' => 'Корзина очищена']);
+    }
+    public function update(Request $request, $id)
+    {
+        $request->validate([
+            'quantity' => 'required|integer|min:1'
+        ]);
+
+        $cartItem = CartItem::where('user_id', auth()->id())
+            ->where('id', $id)
+            ->firstOrFail();
+        
+        $product = Product::find($cartItem->product_id);
+
+        if ($product->stock < $request->quantity) {
+            return response()->json(['message' => 'Не хватает товара'], 400);
+        }
+        
+        $cartItem->quantity = $request->quantity;
+        $cartItem->save();
+        
+        return response()->json(['message' => 'Обновлено']);
     }
 }
